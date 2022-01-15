@@ -1,12 +1,15 @@
+from threading import Lock
 from ring_doorbell import Ring
 from pprint import pprint
 
 import paho.mqtt.client as mqtt
+import threading
 
 class RingMqtt:
 
-    def __init__(self, ring: Ring):
+    def __init__(self, ring: Ring, ring_mutex: Lock):
         self.ring = ring
+        self.ring_mutex = ring_mutex
 
     def setup_mqtt_client(self, hostname):
         self.ring.update_data()
@@ -19,13 +22,17 @@ class RingMqtt:
 
 
     def update_mqtt(self):
-        self.ring.update_groups()
-        groups = self.ring.groups()
-        for groupKey in groups:
-            group = groups[groupKey]
-            print(group.name, " ", group.lights)
-            self.client.publish(group.name.lower() + "/light/status", ("ON" if group.lights else "OFF"))
-            
+        self.ring_mutex.acquire()
+        try:
+            self.ring.update_groups()
+            groups = self.ring.groups()
+            for groupKey in groups:
+                group = groups[groupKey]
+                print(group.name, " ", group.lights)
+                self.client.publish(group.name.lower() + "/light/status", ("ON" if group.lights else "OFF"))
+        finally:
+            self.ring_mutex.release()
+
     # The callback for when the client receives a CONNACK response from the server.
     def on_connect(self, client, userdata, flags, rc):
         print("Connected with result code "+str(rc))
@@ -42,15 +49,17 @@ class RingMqtt:
         print(msg.topic+" "+str(msg.payload))
         
         topicParts = msg.topic.split("/")
-        groups = self.ring.groups()
-        for groupKey in groups:
-            group = groups[groupKey]
-            if group.name.lower() == topicParts[0]:
-                # check the payload
-                payloadStr = msg.payload.decode()
-                print("Setting", group.name, " ", payloadStr)
-                group.lights = True if payloadStr == "ON" else False
-                self.update_mqtt()
-                return
-
-   
+        self.ring_mutex.acquire()
+        try:
+            groups = self.ring.groups()
+            for groupKey in groups:
+                group = groups[groupKey]
+                if group.name.lower() == topicParts[0]:
+                    # check the payload
+                    payloadStr = msg.payload.decode()
+                    print("Setting", group.name, " ", payloadStr)
+                    
+                    group.lights = True if payloadStr == "ON" else False
+                    break
+        finally:
+            self.ring_mutex.release()
