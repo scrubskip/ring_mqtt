@@ -3,13 +3,18 @@ from ring_doorbell import Ring
 from pprint import pprint
 
 import paho.mqtt.client as mqtt
-import threading
+from threading import Lock
+
+from logging import Logger
+import logging
+import sys
 
 class RingMqtt:
 
-    def __init__(self, ring: Ring, ring_mutex: Lock):
+    def __init__(self, ring: Ring, ring_mutex: Lock, logger: Logger):
         self.ring = ring
         self.ring_mutex = ring_mutex
+        self.logger = logger
 
     def setup_mqtt_client(self, hostname):
         self.ring.update_data()
@@ -28,7 +33,7 @@ class RingMqtt:
             groups = self.ring.groups()
             for groupKey in groups:
                 group = groups[groupKey]
-                print(group.name, " ", group.lights)
+                self.logger.info(group.name + " " + str(group.lights))
                 self.client.publish(group.name.lower() + "/light/status", ("ON" if group.lights else "OFF"))
         finally:
             self.ring_mutex.release()
@@ -46,7 +51,7 @@ class RingMqtt:
 
     # The callback for when a PUBLISH message is received from the server.
     def on_message(self, client, userdata, msg : mqtt.MQTTMessage):
-        print(msg.topic+" "+str(msg.payload))
+        self.logger.info(msg.topic + " " + msg.payload.decode())
         
         topicParts = msg.topic.split("/")
         self.ring_mutex.acquire()
@@ -57,7 +62,7 @@ class RingMqtt:
                 if group.name.lower() == topicParts[0]:
                     # check the payload
                     payloadStr = msg.payload.decode()
-                    print("Setting", group.name, " ", payloadStr)
+                    self.logger.info("Setting " + group.name + " " + payloadStr)
                     
                     group.lights = True if payloadStr == "ON" else False
                     break

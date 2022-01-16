@@ -11,6 +11,9 @@ import time
 import threading
 from threading import Lock
 
+import logging
+import sys
+
 from mqtt_client import RingMqtt
 
 cache_file = Path("test_token.cache")
@@ -31,6 +34,17 @@ def main():
     parser.add_argument("--update_frequency", default="10", type=int,
             help="Update frequency, in minutes")
     args = parser.parse_args()
+
+    logger = logging.getLogger("RingMQTT")
+    logger.setLevel(logging.INFO)
+
+    # this is just to make the output look nice
+    formatter = logging.Formatter(fmt="%(asctime)s %(name)s.%(levelname)s: %(message)s", datefmt="%Y.%m.%d %H:%M:%S")
+
+    # this logs to stdout and I think it is flushed immediately
+    handler = logging.StreamHandler(stream=sys.stdout)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
     if cache_file.is_file():
         auth = Auth("RingMqtt/2.0", json.loads(cache_file.read_text()), token_updated)
@@ -56,19 +70,19 @@ def main():
         group.update()
         print(group.name, " ", group.lights)
 
-    ringMqtt = RingMqtt(ring, ring_mutex)
+    ringMqtt = RingMqtt(ring, ring_mutex, logger)
 
     # Start the update thread loop
     updateThread = threading.Thread(target=update_loop,
-            args=(ring, ring_mutex, args.update_frequency), daemon=True)
+            args=(ring, ring_mutex, args.update_frequency, logger), daemon=True)
     updateThread.start()
     # Start the server
     ringMqtt.setup_mqtt_client(args.hostname)
 
 
-def update_loop(ring: Ring, ring_mutex: Lock, update_frequency: int):
+def update_loop(ring: Ring, ring_mutex: Lock, update_frequency: int, logger: logging.Logger):
     while True:
-        print("Updating Ring groups")
+        logger.info("Updating Ring groups")
         ring_mutex.acquire()
         try:
             ring.update_groups()
